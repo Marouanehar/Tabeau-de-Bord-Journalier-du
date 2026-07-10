@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tableau de Bord - Récapitulatif F&B</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; padding: 20px; color: #333; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1, h2 { color: #2c3e50; }
+        input[type="file"] { margin: 20px 0; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #34495e; color: white; }
+        .total-row { font-weight: bold; background-color: #ecf0f1; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Tableau de Bord Journalier</h1>
+    <p>Veuillez importer le fichier Excel du jour pour générer les récapitulatifs.</p>
+    
+    <input type="file" id="excelUpload" accept=".xlsx, .xls, .xlsm" />
+
+    <div id="dashboard" style="display:none;">
+        <h2>Récap DG (Détail par Site)</h2>
+        <table id="recapDgTable">
+            <thead>
+                <tr>
+                    <th>Site</th>
+                    <th>CA Journalier 2026</th>
+                    <th>Cumul Mensuel 2026</th>
+                </tr>
+            </thead>
+            <tbody>
+                </tbody>
+        </table>
+
+        <h2>Récap Groupe (Consolidation)</h2>
+        <table id="recapGroupeTable">
+            <thead>
+                <tr>
+                    <th>Indicateur</th>
+                    <th>Montant Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    document.getElementById('excelUpload').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+
+            // Liste des sites à extraire
+            const sites = [
+                'Rabat Aswak Assalam', 'Rabat Arribat Centre', 'Rabat Mega Mall', 
+                'Kenitra Aswak Assalam', 'Mohammedia Aswak Assalam', 'Casa Port'
+            ];
+
+            let htmlDg = '';
+            let totalJour = 0;
+            let totalCumul = 0;
+
+            sites.forEach(site => {
+                const worksheet = workbook.Sheets[site];
+                if (worksheet) {
+                    // Convertir la feuille en JSON (en ignorant les 5 premières lignes d'en-tête)
+                    const json = XLSX.utils.sheet_to_json(worksheet, {header: 1, range: 5});
+                    
+                    // Récupérer la dernière ligne contenant des données de chiffre d'affaires
+                    let lastRow = null;
+                    for (let i = json.length - 1; i >= 0; i--) {
+                        if (json[i][2]) { // S'il y a une valeur dans la colonne "CA Journalier" (index 2)
+                            lastRow = json[i];
+                            break;
+                        }
+                    }
+
+                    if (lastRow) {
+                        const caJour = parseFloat(lastRow[2]) || 0;
+                        const caCumul = parseFloat(lastRow[3]) || 0;
+
+                        totalJour += caJour;
+                        totalCumul += caCumul;
+
+                        htmlDg += `<tr>
+                                    <td>${site}</td>
+                                    <td>${caJour.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</td>
+                                    <td>${caCumul.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</td>
+                                   </tr>`;
+                    }
+                }
+            });
+
+            // Afficher le Récap DG
+            document.querySelector('#recapDgTable tbody').innerHTML = htmlDg;
+
+            // Afficher le Récap Groupe
+            let htmlGroupe = `
+                <tr><td><strong>CA Journalier Global</strong></td><td><strong>${totalJour.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</strong></td></tr>
+                <tr><td><strong>Cumul Mensuel Global</strong></td><td><strong>${totalCumul.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</strong></td></tr>
+            `;
+            document.querySelector('#recapGroupeTable tbody').innerHTML = htmlGroupe;
+
+            // Rendre les tableaux visibles
+            document.getElementById('dashboard').style.display = 'block';
+        };
+        reader.readAsArrayBuffer(file);
+    });
+</script>
+
+</body>
+</html>
