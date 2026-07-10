@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tableau de Bord - Récapitulatif & Export Excel</title>
+    <title>Tableau de Bord - Récapitulatif F&B</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; padding: 20px; color: #333; }
@@ -11,22 +11,25 @@
         h1, h2 { color: #2c3e50; }
         input[type="file"] { margin: 20px 0; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; margin-bottom: 30px; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #34495e; color: white; }
-        .btn-export { background-color: #27ae60; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: right; }
+        th { background-color: #34495e; color: white; text-align: center; }
+        td:first-child { text-align: left; font-weight: bold; }
+        .btn-export { background-color: #27ae60; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px; width: 100%; transition: background 0.3s; }
         .btn-export:hover { background-color: #219150; }
+        .positive { color: #27ae60; font-weight: bold; }
+        .negative { color: #e74c3c; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h1>Tableau de Bord Journalier</h1>
-    <p>Veuillez importer le fichier Excel du jour pour générer les récapitulatifs et exporter le résultat.</p>
+    <p>Importez le fichier du jour pour générer les rapports DG et Groupe.</p>
     
     <input type="file" id="excelUpload" accept=".xlsx, .xls, .xlsm" />
 
     <div id="dashboard" style="display:none;">
-        <button class="btn-export" onclick="exportToExcel()">📥 Exporter les Récapitulatifs en Excel</button>
+        <button class="btn-export" onclick="exportToExcel()">📥 Télécharger le Fichier Excel (Format DG & Groupe)</button>
 
         <h2>Récap DG (Détail par Site)</h2>
         <table id="recapDgTable">
@@ -35,8 +38,8 @@
                     <th>Site</th>
                     <th>CA Journalier 2026</th>
                     <th>Cumul Mensuel 2026</th>
-                    <th>Var. / Date Exacte</th>
-                    <th>Var. / Jour Équivalent</th>
+                    <th>Var. / Date Exacte (%)</th>
+                    <th>Var. / Jour Équiv. (%)</th>
                 </tr>
             </thead>
             <tbody>
@@ -47,8 +50,8 @@
         <table id="recapGroupeTable">
             <thead>
                 <tr>
-                    <th>Indicateur</th>
-                    <th>Montant Total / Résultat</th>
+                    <th>Indicateur Groupe</th>
+                    <th>Résultat Global</th>
                 </tr>
             </thead>
             <tbody>
@@ -58,9 +61,25 @@
 </div>
 
 <script>
+    // Variables globales pour stocker les données pures pour l'export Excel
+    let exportDataDg = [];
+    let exportDataGroupe = [];
+    let dateDuJourStr = "";
+
+    // Formateur de devise et pourcentage
+    const formatMoney = (val) => val.toLocaleString('fr-MA', {style:'currency', currency:'MAD'});
+    const formatPct = (val) => {
+        const pct = (val * 100).toFixed(2) + ' %';
+        return val >= 0 ? `<span class="positive">+${pct}</span>` : `<span class="negative">${pct}</span>`;
+    };
+
     document.getElementById('excelUpload').addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
+
+        // Générer la date d'aujourd'hui en format texte (ex: Jeudi 2 Juillet 2026)
+        const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        dateDuJourStr = "Journée du : " + new Date().toLocaleDateString('fr-FR', dateOptions).replace(/^\w/, (c) => c.toUpperCase());
 
         const reader = new FileReader();
         reader.onload = function(e) {
@@ -73,10 +92,14 @@
             ];
 
             let htmlDg = '';
-            let totalJour = 0;
-            let totalCumul = 0;
-            let totalVarDate = 0;
-            let totalVarJour = 0;
+            
+            // Totaux pour recalculer les pourcentages globaux
+            let totCA2026 = 0;
+            let totCumul2026 = 0;
+            let totCA2025DateEx = 0;
+            let totCA2025JourEq = 0;
+
+            exportDataDg = []; // Réinitialiser les données
 
             sites.forEach(site => {
                 const worksheet = workbook.Sheets[site];
@@ -85,70 +108,107 @@
                     
                     let lastRow = null;
                     for (let i = json.length - 1; i >= 0; i--) {
-                        if (json[i][2]) { 
+                        if (json[i][2]) { // S'il y a du CA Journalier
                             lastRow = json[i];
                             break;
                         }
                     }
 
                     if (lastRow) {
-                        // Extraction des valeurs numériques
                         const caJour = parseFloat(lastRow[2]) || 0;
                         const caCumul = parseFloat(lastRow[3]) || 0;
                         
-                        // /!\ MODIFICATION DES INDEX ICI SI NÉCESSAIRE /!\
-                        // index 12 = Colonne M (Variation Date exacte), index 14 = Colonne O (Variation Jour équivalent)
-                        const varDate = parseFloat(lastRow[12]) || 0; 
-                        const varJour = parseFloat(lastRow[14]) || 0; 
+                        // Valeurs de base 2025 pour le calcul Groupe
+                        const ca25DateEx = parseFloat(lastRow[6]) || 0;
+                        const ca25JourEq = parseFloat(lastRow[10]) || 0;
 
-                        // Cumuls globaux pour la feuille Groupe
-                        totalJour += caJour;
-                        totalCumul += caCumul;
-                        totalVarDate += varDate;
-                        totalVarJour += varJour;
+                        // Pourcentages directs pour le site (Index 13 et 15)
+                        const pctDate = parseFloat(lastRow[13]) || 0; 
+                        const pctJour = parseFloat(lastRow[15]) || 0; 
 
+                        // Ajout aux totaux globaux
+                        totCA2026 += caJour;
+                        totCumul2026 += caCumul;
+                        totCA2025DateEx += ca25DateEx;
+                        totCA2025JourEq += ca25JourEq;
+
+                        // Création ligne HTML
                         htmlDg += `<tr>
                                     <td>${site}</td>
-                                    <td>${caJour.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</td>
-                                    <td>${caCumul.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</td>
-                                    <td>${varDate.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</td>
-                                    <td>${varJour.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</td>
+                                    <td>${formatMoney(caJour)}</td>
+                                    <td>${formatMoney(caCumul)}</td>
+                                    <td>${formatPct(pctDate)}</td>
+                                    <td>${formatPct(pctJour)}</td>
                                    </tr>`;
+
+                        // Ajout à la matrice d'export Excel brute
+                        exportDataDg.push([site, caJour, caCumul, pctDate, pctJour]);
                     }
                 }
             });
 
-            // Injection dans le tableau Récap DG
+            // Calcul des VRAIS pourcentages globaux du Groupe
+            const globalPctDate = totCA2025DateEx !== 0 ? (totCA2026 - totCA2025DateEx) / totCA2025DateEx : 0;
+            const globalPctJour = totCA2025JourEq !== 0 ? (totCA2026 - totCA2025JourEq) / totCA2025JourEq : 0;
+
             document.querySelector('#recapDgTable tbody').innerHTML = htmlDg;
 
-            // Injection dans le tableau Récap Groupe
             let htmlGroupe = `
-                <tr><td><strong>CA Journalier Global</strong></td><td><strong>${totalJour.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</strong></td></tr>
-                <tr><td><strong>Cumul Mensuel Global</strong></td><td><strong>${totalCumul.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</strong></td></tr>
-                <tr><td><strong>Variation Globale / Date Exacte</strong></td><td><strong>${totalVarDate.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</strong></td></tr>
-                <tr><td><strong>Variation Globale / Jour Équivalent</strong></td><td><strong>${totalVarJour.toLocaleString('fr-MA', {style:'currency', currency:'MAD'})}</strong></td></tr>
+                <tr><td>CA Journalier Global</td><td>${formatMoney(totCA2026)}</td></tr>
+                <tr><td>Cumul Mensuel Global</td><td>${formatMoney(totCumul2026)}</td></tr>
+                <tr><td>Évolution Globale / Date Exacte</td><td>${formatPct(globalPctDate)}</td></tr>
+                <tr><td>Évolution Globale / Jour Équivalent</td><td>${formatPct(globalPctJour)}</td></tr>
             `;
             document.querySelector('#recapGroupeTable tbody').innerHTML = htmlGroupe;
+
+            // Préparation matrice export Groupe brute
+            exportDataGroupe = [
+                ["CA Journalier Global", totCA2026],
+                ["Cumul Mensuel Global", totCumul2026],
+                ["Variation Globale / Date Exacte (%)", globalPctDate],
+                ["Variation Globale / Jour Équivalent (%)", globalPctJour]
+            ];
 
             document.getElementById('dashboard').style.display = 'block';
         };
         reader.readAsArrayBuffer(file);
     });
 
-    // Fonction d'exportation vers un nouveau fichier Excel multi-feuilles
+    // Fonction d'export structuré
     function exportToExcel() {
         const wb = XLSX.utils.book_new();
+
+        // --- 1. Construction de la feuille Recap DG ---
+        // On recrée l'en-tête de votre fichier d'origine
+        const dgMatrix = [
+            ["", "", "Tableau de bord du chiffre d'affaires journalier"],
+            [],
+            [],
+            ["", "", "", dateDuJourStr],
+            [],
+            ["Site", "CA Journalier 2026", "Cumul Mensuel 2026", "Variation / Date exacte (%)", "Variation / Jour équivalent (%)"],
+            ...exportDataDg
+        ];
+        const wsDg = XLSX.utils.aoa_to_sheet(dgMatrix);
         
-        // 1. Conversion de la table HTML "Récap DG" en feuille Excel
-        const wsDg = XLSX.utils.table_to_sheet(document.getElementById('recapDgTable'));
-        XLSX.utils.book_append_sheet(wb, wsDg, "Récap DG");
-        
-        // 2. Conversion de la table HTML "Récap Groupe" en feuille Excel
-        const wsGroupe = XLSX.utils.table_to_sheet(document.getElementById('recapGroupeTable'));
-        XLSX.utils.book_append_sheet(wb, wsGroupe, "Récap Groupe");
-        
-        // 3. Génération et téléchargement du fichier
-        XLSX.writeFile(wb, "Recapitulatif_Généré.xlsx");
+        // --- 2. Construction de la feuille Recap Groupe ---
+        const groupeMatrix = [
+            ["", "Tableau de bord du chiffre d'affaires journalier"],
+            [],
+            [],
+            ["", "", dateDuJourStr],
+            [],
+            ["Indicateur", "Valeur / Évolution"],
+            ...exportDataGroupe
+        ];
+        const wsGroupe = XLSX.utils.aoa_to_sheet(groupeMatrix);
+
+        // Ajout des feuilles au classeur
+        XLSX.utils.book_append_sheet(wb, wsDg, "Recap DG");
+        XLSX.utils.book_append_sheet(wb, wsGroupe, "Recap Groupe");
+
+        // Téléchargement
+        XLSX.writeFile(wb, "Tableau_de_Bord_Consolide.xlsx");
     }
 </script>
 
